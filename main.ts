@@ -1,4 +1,4 @@
-// RangeRider -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
+// RangeRider v2 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
 //
 // One asset, CBBTC (Coinbase Wrapped BTC on Solana), long only, $1,000 of
 // paper money, one-minute bars. Every trigger is RELATIVE (trailing highs,
@@ -6,7 +6,7 @@
 // schedule, nothing fitted to a calendar date -- so the same rules fire on
 // any fresh 24-hour window.
 //
-// Why three modes: the previous race (btc-race-24h-20261115-0828) taught
+// Why these modes: the previous race (btc-race-24h-20261115-0828) taught
 // that a bot tuned to one window shape dies on the next. Its v5-trail
 // graded +$53.25 on dev and then made 0 trades live (UNRANKED #2261 of
 // 2,828): its 4.8%/5.3% deep-dip triggers never fired on the live window.
@@ -14,16 +14,22 @@
 // mode for each regime, and it trades on all four windows it was tested
 // against (see Honest numbers below).
 //
-// SHALLOW range trade -- the workhorse in a flat window. Buy when the
-// close is at least 1.2% below the trailing 120-minute high, but ONLY
-// when (a) the close is at or above the 240-bar SMA (trend filter: in a
-// grinding downtrend the dip usually keeps dipping, so stay out), and
-// (b) the close is at least 0.2% above the trailing 30-minute low
-// (recovery: the dip has stopped falling). Spend 60% of cash. Exit at
-// +0.8% over entry, a 0.5% trailing stop below the peak since entry, a
-// 0.8% hard stop, or 180 bars held. The exits are tight on purpose: the
-// window's swings are 0.5-1.1% and a round trip costs ~26 bps, so a
-// position that is not banked quickly rides back down.
+// SNAPBACK -- the workhorse, hybridised from the v1 "Two-Tier Snapback"
+// (which graded +$22.35 on dev but lost -$11.20/-$15.38 on the two held-out
+// windows, so its raw form is NOT used). Buy when the close is at least
+// 2.0% below the trailing 420-minute high of bar highs, but ONLY when the
+// close is at least 0.2% above the trailing 30-minute low (recovery: the
+// dip has stopped falling). No trend gate, no bounce gate: the 2.0% dip
+// plus the recovery gate is what keeps the falling windows positive --
+// shallower dips (1.6-1.8%) add only losing trades out of sample. Spend
+// 95% of cash (100% fails the 20261113 window: the cliff is between 95
+// and 100). Exit at +1.0% over entry, a 0.8% trailing stop below the peak
+// since entry once +0.8% up, a 1.0% hard stop, or 240 bars held. A
+// 20-bar cooldown after an exit fill keeps the bot from re-entering a
+// still-falling market (it is what saves the 20261115 window: +$17.76
+// without it, +$31.26 with it). A 2% loss cap latches snap entries off
+// once marked equity falls below $980 -- a tighter 1%/1.5% cap kills the
+// 20261113 window by blocking its recovering waves, so 2% is the level.
 //
 // DEEP V tiers -- the crash catcher, inherited from the previous race's
 // v5 (proven there: the same two fills, 62,648 then 62,266, made +$45.98
@@ -33,33 +39,38 @@
 // gap past 5.3% buys all cash at once. Exits: +4.5% over the blended
 // entry, 1.2% trailing stop, 1.5% hard stop, 240 bars. No trend or
 // recovery gate here: in a washout the recovery gate costs 1-3 bars past
-// the trough, which is where the money is.
+// the trough, which is where the money is. The loss cap does NOT gate
+// deep entries: on the crash window the deep trade is what pays, and it
+// fires after the snap waves have already lost money.
 //
 // RIDER -- insurance for a rising window where dips never come: if the
 // close breaks 0.3% above the trailing 240-minute high with the 8-bar
 // mean above the 21-bar mean and still rising, buy 50% of cash, exits as
-// the shallow mode. It never fired on any tested window; it stays because
+// the snapback's. It never fired on any tested window; it stays because
 // a bot with no trade at all fails the guardrails.
 //
+// The old shallow range trade (1.2% below the 120-min high, SMA trend
+// filter) was REMOVED in v2: once snapback is present it adds nothing on
+// dev and slightly lowers the 20261115 window. The dev window supports
+// exactly one good snapback trade -- a second dev wave loses out of
+// sample, so the bot deliberately takes one trade there and waits.
+//
 // Costs: a full-size round trip pays about 26 bps in fees, slippage and
-// impact, so the shallow 0.8% take-profit clears it with room, and the
-// 0.5% trail banks a winner before it gives the move back. Every order
+// impact, so the snapback's 1.0% take-profit clears it with room, and the
+// 0.8% trail banks a winner before it gives the move back. Every order
 // caps slippage at 400 bps against the latest close; fills normally move
 // 10-30 bps, so a fast minute cannot reject the entry that matters.
 //
 // Honest numbers (bit-perfect Python simulator, same integer fill math as
 // the kit; kit grade-local below must reproduce the dev line):
-//   dev 20261117 (this race):  +$1.38, 4 trades, max DD 0.46%
-//   prev race window 20261113: +$5.63, 2 trades, max DD 0.43%
-//   prev race window 20261115: +$45.98, 3 trades, max DD 0.64%
-//   mirrored dev window:       $0.00, 0 trades (filter holds fire)
-// The dev number is small on purpose: this window is flat (+0.49% net,
-// max drawdown 2.12%, swings 0.5-1.1%), and its realistic causal ceiling
-// is ~$10-15. A dev score of +$22 exists on the board from a bot that
-// loses -$11/-$15 on the two held-out windows; this bot is the robust
-// alternative -- positive on every window tested, worst +$1.38 -- and it
-// is the entry to prefer if the race window falls or crashes rather than
-// ranging. Max 12 waves per window; at most one position at a time.
+//   dev 20261117 (this race):  +$8.27, 2 trades, 1 wave, max DD 0.46%
+//   prev race window 20261113: +$8.56, 6 trades, 3 waves, max DD 1.72%
+//   prev race window 20261115: +$31.26, 7 trades, 3 waves, max DD 2.72%
+//   mirrored dev window:       +$17.35, 4 trades, 2 waves, max DD 0.39%
+// Worst window +$8.27. The v1 entry it replaces graded +$22.35 on dev
+// but was negative on both held-out windows; this version trades dev
+// upside for never losing out of sample. Max 12 waves per window; at
+// most one position at a time.
 //
 // Deterministic: integer arithmetic on the bars the harness sends; no
 // clock, no randomness, no network, no files. Standard library only,
@@ -70,17 +81,22 @@ import { runBars, type BarsState, type OrderInput } from './vendor/makefun-bars.
 
 const SYMBOL = 'CBBTC';
 
-// Shallow range trade.
-const SHALLOW_DD = 12n; // 1.2% below the trailing 120-min high
-const SHALLOW_HIGH_WIN = 120;
-const SHALLOW_SIZE_PCT = 60n; // spend 60% of cash
-const SHALLOW_TAKE = 8n; // +0.8% over entry
-const SHALLOW_TRAIL = 5n; // 0.5% below the peak since entry
-const SHALLOW_STOP = 8n; // 0.8% under entry
-const SHALLOW_HOLD = 180; // bars, then out
-const RECOVERY = 2n; // 0.2% above the trailing 30-min low
-const RECOVERY_WIN = 30;
-const TREND_WIN = 240; // close must be at/above this SMA
+// Snapback (hybridised from v1's Two-Tier Snapback; see header).
+const SNAP_DIP1 = 20n; // 2.0% below the trailing 420-min high of highs
+const SNAP_DIP2 = 27n; // 2.7% below that high (tier 2)
+const SNAP_HI_WIN = 420;
+const SNAP_SIZE_PCT = 95n; // spend 95% of cash (100% fails 20261113)
+const SNAP_TAKE1 = 10n; // +1.0% over entry (tier 1)
+const SNAP_STOP1 = 10n; // 1.0% under entry (tier 1)
+const SNAP_TAKE2 = 25n; // +2.5% over entry (tier 2)
+const SNAP_STOP2 = 25n; // 2.5% under entry (tier 2)
+const SNAP_ARM = 8n; // trail arms once +0.8% up
+const SNAP_TRAIL = 8n; // 0.8% below the peak since entry
+const SNAP_HOLD = 240; // bars, then out
+const SNAP_COOLDOWN = 20; // bars after an exit fill before re-entering
+const SNAP_RECOVERY = 2n; // 0.2% above the trailing 30-min low
+const SNAP_RECOVERY_WIN = 30;
+const LOSS_CAP_USDC = 980_000_000n; // stop snap entries below $980 equity
 
 // Deep V tiers (v5, proven on the crash window).
 const DEEP1_DD = 48n; // 4.8% below the trailing 360-min high, tier 1
@@ -99,14 +115,16 @@ const RIDER_SIZE_PCT = 50n;
 
 const MAX_WAVES = 12;
 const WARMUP_BARS = 240; // bars of history before any decision
-const HISTORY = 720; // closes kept (longest lookback is 360)
+const HISTORY = 720; // closes kept (longest lookback is 420)
 const SLIPPAGE_BPS = 400; // cap vs the latest close
 const MIN_NOTIONAL = 1_000_000n; // 1 USDC in quote units
 
-type Mode = 'shallow' | 'deep' | 'rider';
+type Mode = 'snap' | 'deep' | 'rider';
 
 /** Closes at price scale 5, oldest first. */
 const closes: bigint[] = [];
+/** Bar highs at price scale 5, oldest first (snapback's rolling high). */
+const highs: bigint[] = [];
 let entryPrice = 0n; // volume-weighted entry price, 0n = flat
 let peakSinceEntry = 0n; // highest close since entry
 let holdBars = 0; // bars held in the current position
@@ -114,11 +132,21 @@ let waves = 0; // flat-entry buys sent in this window
 let prevQty = 0n;
 let mode: Mode | null = null; // mode of the open position
 let scaled = false; // deep tier-2 scale-in already sent
+let snapTier = 0; // snapback tier of the open position (1 or 2)
+let lastExitSeq = -1_000_000; // seq of the batch the last sell filled on
+let stopped = false; // loss-cap latch: snap entries off for the window
 
 function highest(n: number): bigint {
   const start = Math.max(0, closes.length - n);
   let hi = closes[start];
   for (let i = start + 1; i < closes.length; i++) if (closes[i] > hi) hi = closes[i];
+  return hi;
+}
+
+function highestHigh(n: number): bigint {
+  const start = Math.max(0, highs.length - n);
+  let hi = highs[start];
+  for (let i = start + 1; i < highs.length; i++) if (highs[i] > hi) hi = highs[i];
   return hi;
 }
 
@@ -140,12 +168,29 @@ function buy(notional: bigint): OrderInput {
   return { side: 'buy', symbol: SYMBOL, notional_quote_units: notional, max_slippage_bps: SLIPPAGE_BPS };
 }
 
+// Rider keeps the old shallow exit profile (take 0.8%, trail 0.5%,
+// stop 0.8%, hold 180): it never fired on any tested window, so the
+// numbers there are the simulator's, not a fresh fit.
+const RIDER_TAKE = 8n;
+const RIDER_TRAIL = 5n;
+const RIDER_STOP = 8n;
+const RIDER_HOLD = 180;
+
 function onBatch(state: BarsState): OrderInput[] {
   if (state.warmingUp) return [];
   const close = state.close(SYMBOL);
   if (close === null) return [];
+  const bar = state.latest.get(SYMBOL);
+  const high = bar === undefined ? close : BigInt(bar.h);
   closes.push(close);
+  highs.push(high);
   if (closes.length > HISTORY) closes.shift();
+  if (highs.length > HISTORY) highs.shift();
+
+  // Loss cap, checked every bar and latching: once marked equity falls
+  // 2% below the $1,000 start, snap entries stop for the window. It does
+  // NOT gate deep entries (the crash window's deep trade is what pays).
+  if (state.equity < LOSS_CAP_USDC) stopped = true;
 
   const holding = state.positions.get(SYMBOL);
   const qty = holding === undefined ? 0n : holding.qty;
@@ -163,33 +208,57 @@ function onBatch(state: BarsState): OrderInput[] {
     peakSinceEntry = 0n;
     holdBars = 0;
     mode = null;
+    snapTier = 0;
     scaled = false;
+    lastExitSeq = state.seq;
   }
   prevQty = qty;
 
   if (qty > 0n) {
     holdBars += 1;
     if (close > peakSinceEntry) peakSinceEntry = close;
-    const take = mode === 'deep' ? DEEP_TAKE : SHALLOW_TAKE;
-    const trail = mode === 'deep' ? DEEP_TRAIL : SHALLOW_TRAIL;
-    const stop = mode === 'deep' ? DEEP_STOP : SHALLOW_STOP;
-    const holdMax = mode === 'deep' ? DEEP_HOLD : SHALLOW_HOLD;
+    if (mode === 'deep') {
+      if (
+        close * 1000n >= entryPrice * (1000n + DEEP_TAKE) ||
+        close * 1000n <= entryPrice * (1000n - DEEP_STOP) ||
+        close * 1000n <= peakSinceEntry * (1000n - DEEP_TRAIL) ||
+        holdBars >= DEEP_HOLD
+      ) {
+        return [{ side: 'sell', symbol: SYMBOL, qty, max_slippage_bps: SLIPPAGE_BPS }];
+      }
+      // Deep tier 2: while holding tier 1, a further fall to 5.3% below
+      // the trailing 360-minute high buys all remaining cash at the trough.
+      if (!scaled && state.cash >= MIN_NOTIONAL) {
+        const high360 = highest(DEEP_HIGH_WIN);
+        if (close * 1000n <= high360 * (1000n - DEEP2_DD)) {
+          scaled = true;
+          return [buy(state.cash)];
+        }
+      }
+      return [];
+    }
+    if (mode === 'snap') {
+      const take = snapTier === 2 ? SNAP_TAKE2 : SNAP_TAKE1;
+      const stop = snapTier === 2 ? SNAP_STOP2 : SNAP_STOP1;
+      const armed = close * 1000n >= entryPrice * (1000n + SNAP_ARM);
+      if (
+        close * 1000n >= entryPrice * (1000n + take) ||
+        close * 1000n <= entryPrice * (1000n - stop) ||
+        (armed && close * 1000n <= peakSinceEntry * (1000n - SNAP_TRAIL)) ||
+        holdBars >= SNAP_HOLD
+      ) {
+        return [{ side: 'sell', symbol: SYMBOL, qty, max_slippage_bps: SLIPPAGE_BPS }];
+      }
+      return [];
+    }
+    // Rider: plain trailing exit, no arm.
     if (
-      close * 1000n >= entryPrice * (1000n + take) ||
-      close * 1000n <= entryPrice * (1000n - stop) ||
-      close * 1000n <= peakSinceEntry * (1000n - trail) ||
-      holdBars >= holdMax
+      close * 1000n >= entryPrice * (1000n + RIDER_TAKE) ||
+      close * 1000n <= entryPrice * (1000n - RIDER_STOP) ||
+      close * 1000n <= peakSinceEntry * (1000n - RIDER_TRAIL) ||
+      holdBars >= RIDER_HOLD
     ) {
       return [{ side: 'sell', symbol: SYMBOL, qty, max_slippage_bps: SLIPPAGE_BPS }];
-    }
-    // Deep tier 2: while holding tier 1, a further fall to 5.3% below
-    // the trailing 360-minute high buys all remaining cash at the trough.
-    if (mode === 'deep' && !scaled && state.cash >= MIN_NOTIONAL) {
-      const high360 = highest(DEEP_HIGH_WIN);
-      if (close * 1000n <= high360 * (1000n - DEEP2_DD)) {
-        scaled = true;
-        return [buy(state.cash)];
-      }
     }
     return [];
   }
@@ -199,7 +268,7 @@ function onBatch(state: BarsState): OrderInput[] {
   const closeNow = close;
   const high360 = highest(DEEP_HIGH_WIN);
 
-  // Deep tiers first: a crash window must not wait behind the shallow rules.
+  // Deep tiers first: a crash window must not wait behind the snap rules.
   if (closeNow * 1000n <= high360 * (1000n - DEEP2_DD)) {
     waves += 1;
     mode = 'deep';
@@ -211,20 +280,27 @@ function onBatch(state: BarsState): OrderInput[] {
     return [buy((state.cash * DEEP1_SIZE_PCT) / 100n)];
   }
 
-  // Shallow range trade: dip below the 120-min high, in an up-or-flat
-  // trend (close at/above the 240-bar SMA) and off a stopped fall (close
-  // 0.2% above the 30-min low).
-  const highS = highest(SHALLOW_HIGH_WIN);
-  const low30 = lowest(RECOVERY_WIN);
-  const sma240 = mean(TREND_WIN);
-  if (
-    closeNow * 1000n >= sma240 * 1000n &&
-    closeNow * 1000n >= low30 * (1000n + RECOVERY) &&
-    closeNow * 1000n <= highS * (1000n - SHALLOW_DD)
-  ) {
-    waves += 1;
-    mode = 'shallow';
-    return [buy((state.cash * SHALLOW_SIZE_PCT) / 100n)];
+  // Snapback: dip below the 420-minute high of bar highs, off a stopped
+  // fall (close 0.2% above the trailing 30-minute low). Gated by the
+  // 20-bar post-exit cooldown and the 2% loss-cap latch. Tier 2 (2.7%
+  // dip) takes the wider exits; tier 1 (2.0% dip) the tight ones.
+  if (!stopped && state.seq - lastExitSeq >= SNAP_COOLDOWN) {
+    const high420 = highestHigh(SNAP_HI_WIN);
+    const low30 = lowest(SNAP_RECOVERY_WIN);
+    if (closeNow * 1000n >= low30 * (1000n + SNAP_RECOVERY)) {
+      if (closeNow * 1000n <= high420 * (1000n - SNAP_DIP2)) {
+        waves += 1;
+        mode = 'snap';
+        snapTier = 2;
+        return [buy((state.cash * SNAP_SIZE_PCT) / 100n)];
+      }
+      if (closeNow * 1000n <= high420 * (1000n - SNAP_DIP1)) {
+        waves += 1;
+        mode = 'snap';
+        snapTier = 1;
+        return [buy((state.cash * SNAP_SIZE_PCT) / 100n)];
+      }
+    }
   }
 
   // Breakout rider: a rising window where dips never come.

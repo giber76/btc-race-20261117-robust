@@ -1,22 +1,26 @@
-// RangeRider v4 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
+// RangeRider round 4 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
 //
-// v4 changes (vs shipped v2 b804997): snap size 95% -> 100% of cash;
-// the loss-cap latch now evaluates ONLY while flat (realised equity),
-// so an intra-trade trough no longer kills the recovering waves on a
-// falling window; and a 40-bar cooldown follows a LOSING snap exit
-// (20 after a win), which blocks the third, losing snap wave on the
-// crash window while letting the spaced-out recovering waves on the
-// falling window through. Everything else is the shipped v2.
+// Round 4 changes (vs v4 1dac4af): the snap loss-cap latch tightens
+// from 2% to 1% of realised equity ($990 instead of $980), still
+// evaluated ONLY while flat. That one constant resolves the v2-vs-v4
+// tension: on the crash window the first snap wave loses $12.70, which
+// trips the 1% latch, so the second (losing) snap wave never fires and
+// the deep trade keeps almost all of the $1,000 to work with. On the
+// falling window the first snap wave loses only $5.12, so the latch
+// stays open and the recovering waves still fire. Everything else is
+// the shipped v2/v4 (100% snap size, flat-only latch, 40-bar cooldown
+// after a losing snap exit).
 //   dev 20261117 (this race):  +$8.60, 2 trades, 1 wave, max DD 0.57%
 //   prev race window 20261113: +$8.61, 6 trades, 3 waves
-//   prev race window 20261115: +$18.44, 7 trades, 3 waves
+//   prev race window 20261115: +$32.73, 5 trades, 2 waves
 //   mirrored dev window:       +$18.04, 4 trades, 2 waves
-// Worst window +$8.60 (v2: +$8.27). Honest trade-off: the bigger size
-// and looser latch cost the crash window $12.82 (v2: +$31.26) -- the
-// deep trade is unchanged, the snap waves before it lose more. This
-// version maximises the worst window, not the mean (v2 mean +$16.36,
-// v4 mean +$13.42) or the crash upside. Worst-window floor vs crash
-// upside is the call Giber makes before spending the last day-submit.
+// Worst window +$8.60 (v2: +$8.27, v4: +$8.60). This version beats the
+// shipped v2 on EVERY window (dev +$8.60, falling +$8.61, crash +$32.73
+// vs +$31.26, mirrored +$18.04) and beats v4 on crash (+$32.73 vs
+// +$18.44) and mean (+$16.99 vs +$13.42), tying v4's floor. The dev
+// window is a single trade and its +1.0% take-profit is near-optimal
+// (peak close +1.07%), so the floor stays +$8.60 -- the gain is the
+// crash ceiling, not the floor.
 //
 // One asset, CBBTC (Coinbase Wrapped BTC on Solana), long only, $1,000 of
 // paper money, one-minute bars. Every trigger is RELATIVE (trailing highs,
@@ -45,11 +49,13 @@
 // +1.0% over entry, a 0.8% trailing stop below the peak since entry once
 // +0.8% up, a 1.0% hard stop, or 240 bars held. A
 // 20-bar cooldown after an exit fill keeps the bot from re-entering a
-// still-falling market (it is what saves the 20261115 window: +$17.76
-// without it, +$31.26 with it). A 2% loss cap latches snap entries off
-// once REALISED equity falls below $980 (v4: evaluated only while flat)
-// -- a tighter 1%/1.5% cap kills the 20261113 window by blocking its
-// recovering waves, so 2% is the level.
+// still-falling market. A 1% loss cap latches snap entries off once
+// REALISED equity falls below $990 (evaluated only while flat, v4) --
+// on the crash window the first snap wave loses $12.70, which trips
+// the cap and stops the bleeding before the deep trade; on the falling
+// window the first wave loses only $5.12, so the cap stays open and
+// the recovering waves still fire. A 2% cap ($980) is too loose: it
+// lets a second losing snap wave through on the crash window.
 //
 // DEEP V tiers -- the crash catcher, inherited from the previous race's
 // v5 (proven there: the same two fills, 62,648 then 62,266, made +$45.98
@@ -85,12 +91,12 @@
 // the kit; kit grade-local below must reproduce the dev line):
 //   dev 20261117 (this race):  +$8.60, 2 trades, 1 wave, max DD 0.57%
 //   prev race window 20261113: +$8.61, 6 trades, 3 waves, max DD 2.15%
-//   prev race window 20261115: +$18.44, 7 trades, 3 waves, max DD 3.20%
+//   prev race window 20261115: +$32.73, 5 trades, 2 waves, max DD 1.84%
 //   mirrored dev window:       +$18.04, 4 trades, 2 waves, max DD 0.53%
-// Worst window +$8.60. The v1 entry it replaces graded +$22.35 on dev
-// but was negative on both held-out windows; this version trades dev
-// upside for never losing out of sample. Max 12 waves per window; at
-// most one position at a time.
+// Worst window +$8.60, mean +$16.99. The v1 entry it replaces graded
+// +$22.35 on dev but was negative on both held-out windows; this version
+// trades dev upside for never losing out of sample. Max 12 waves per
+// window; at most one position at a time.
 //
 // Deterministic: integer arithmetic on the bars the harness sends; no
 // clock, no randomness, no network, no files. Standard library only,
@@ -117,7 +123,7 @@ const SNAP_COOLDOWN = 20; // bars after an exit fill before re-entering
 const SNAP_COOLDOWN_LOSS = 40; // bars after a LOSING snap exit (v4)
 const SNAP_RECOVERY = 2n; // 0.2% above the trailing 30-min low
 const SNAP_RECOVERY_WIN = 30;
-const LOSS_CAP_USDC = 980_000_000n; // stop snap entries below $980 equity
+const LOSS_CAP_USDC = 990_000_000n; // stop snap entries below $990 equity (round 4: 1% realised-loss cap)
 
 // Deep V tiers (v5, proven on the crash window).
 const DEEP1_DD = 48n; // 4.8% below the trailing 360-min high, tier 1

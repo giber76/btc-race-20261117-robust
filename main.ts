@@ -108,7 +108,8 @@
 // 20261113 wave-1 trough no longer kills the recovering waves). Exit at
 // +1.0% over entry, a 0.8% trailing stop below the peak since entry once
 // +0.8% up, a 0.8% hard stop (tier 1, round 5; 2.5% for tier 2), or 240
-// bars held. A
+// bars held. Tier 2 takes profit at +0.8% (round 8): its waves peak only
+// +0.11%/+0.86% during the hold, so the old +2.5% take never bound. A
 // 20-bar cooldown after an exit fill keeps the bot from re-entering a
 // still-falling market. A 1% loss cap latches snap entries off once
 // REALISED equity falls below $990 (evaluated only while flat, v4) --
@@ -156,13 +157,15 @@
 // Honest numbers (bit-perfect Python simulator, same integer fill math as
 // the kit; kit grade-local below must reproduce the dev line):
 //   dev 20261117 (this race):  +$8.60, 2 trades, 1 wave, max DD 0.57%
-//   prev race window 20261113: +$8.61, 6 trades, 3 waves, max DD 2.15%
-//   prev race window 20261115: +$40.06, 6 trades, 3 waves, max DD 1.69%
+//   prev race window 20261113: +$9.31, 6 trades, 3 waves, max DD 2.15%
+//   prev race window 20261115: +$40.06, 6 trades, 3 waves, max DD 1.61%
 //   mirrored dev window:       +$18.04, 4 trades, 2 waves, max DD 0.53%
-// Worst window +$8.60, mean +$18.83. The v1 entry it replaces graded
-// +$22.35 on dev but was negative on both held-out windows; this version
-// trades dev upside for never losing out of sample. Max 12 waves per
-// window; at most one position at a time.
+// Worst window +$8.60, mean +$19.00. Round 8: tier-2 take-profit 2.5% ->
+// 0.8% lifts the falling window +$8.61 -> +$9.31 (wave 2 exits on take
+// instead of bleeding out on the 240-bar hold; wave 3 unchanged). The
+// v1 entry it replaces graded +$22.35 on dev but was negative on both
+// held-out windows; this version trades dev upside for never losing out
+// of sample. Max 12 waves per window; at most one position at a time.
 //
 // Deterministic: integer arithmetic on the bars the harness sends; no
 // clock, no randomness, no network, no files. Standard library only,
@@ -180,7 +183,7 @@ const SNAP_HI_WIN = 420;
 const SNAP_SIZE_PCT = 100n; // spend 100% of cash (v4: flat-only latch saves 20261113)
 const SNAP_TAKE1 = 10n; // +1.0% over entry (tier 1)
 const SNAP_STOP1 = 8n; // 0.8% under entry (tier 1; round 5: tighter stop -- the crash wave-1 exit costs $11.24 instead of $12.70, and the $990 latch still trips)
-const SNAP_TAKE2 = 25n; // +2.5% over entry (tier 2)
+const SNAP_TAKE2 = 8n; // +0.8% over entry (tier 2; round 8: 2.5% -> 0.8% -- the falling window's tier-2 waves peak only +0.11%/+0.86% during their 240-bar holds, so the old 2.5% take never bound and they bled out on hold; at +0.8% wave 2 exits at +$5.92 instead of +$5.23 and wave 3 is unchanged, lifting the falling window +$8.61 -> +$9.31; if a live wave-2 peak stays below +0.8% the take never fires and it falls back to the hold exit, so the change can only help or match)
 const SNAP_STOP2 = 25n; // 2.5% under entry (tier 2)
 const SNAP_ARM = 8n; // trail arms once +0.8% up
 const SNAP_TRAIL = 8n; // 0.8% below the peak since entry

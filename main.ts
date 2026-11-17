@@ -1,4 +1,24 @@
-// RangeRider round 5 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
+// RangeRider round 6 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
+//
+// Round 6 changes (vs round 5 e45da0a): the loss-cap latch now RE-ARMS.
+// Once flat and realised equity is back at or above the $990 line, the
+// latch releases and snap entries are allowed again. The latch's job is
+// to stop the bleeding after a loss; once a deep win has repaired equity,
+// the reason for it is gone. On the crash window the deep trade exits at
+// $1,034.26, the latch releases, and a second dip at bar 1408 (2.49% +
+// recovery) fires a snap wave that adds +$4.88 by the window end. Crash
+// +$34.26 -> +$39.14; every other window is unchanged, and the shallow
+// crash proxy (scale-in never triggers) rises too, +$5.74 -> +$10.58.
+// If a re-armed wave loses again and equity falls back below $990, the
+// latch re-trips the same way. A stricter re-arm line ($1,000) gives
+// identical results on every window. Deep tier-1 size stays 40%: sizes
+// 36-42 trade deep-crash profit for shallow-crash profit on a smooth
+// curve with no dominating point (size 48 gains +$3.26 shallow but gives
+// up -$0.49 deep; size 50 breaks the curve), so 40 remains the balanced
+// middle. The dev floor stays +$8.60: the dev window is a single trade
+// whose +1.0% take-profit is near-optimal (peak +1.07%), and no second
+// dip ever occurs after the exit, so no further round can lift the floor
+// from this code.
 //
 // Round 5 changes (vs round 4 efe590f): the tier-1 snap stop tightens
 // from 1.0% to 0.8% (SNAP_STOP1 10n -> 8n). On the crash window the first
@@ -30,15 +50,16 @@
 // after a losing snap exit).
 //   dev 20261117 (this race):  +$8.60, 2 trades, 1 wave, max DD 0.57%
 //   prev race window 20261113: +$8.61, 6 trades, 3 waves
-//   prev race window 20261115: +$34.26, 5 trades, 2 waves
+//   prev race window 20261115: +$39.14, 6 trades, 3 waves
 //   mirrored dev window:       +$18.04, 4 trades, 2 waves
-// Worst window +$8.60 (v2: +$8.27, v4: +$8.60, round 4: +$8.60). This version beats the
-// shipped v2 on EVERY window (dev +$8.60, falling +$8.61, crash +$34.26
-// vs +$31.26, mirrored +$18.04) and beats round 4 on crash (+$34.26 vs
-// +$32.73) and mean (+$17.38 vs +$16.99), tying round 4's floor. The dev
-// window is a single trade and its +1.0% take-profit is near-optimal
-// (peak close +1.07%), so the floor stays +$8.60 -- the gain is the
-// crash ceiling, not the floor.
+// Worst window +$8.60 (v2: +$8.27, v4: +$8.60, round 4: +$8.60,
+// round 5: +$8.60). This version beats the shipped v2 on EVERY window
+// (dev +$8.60, falling +$8.61, crash +$39.14 vs +$31.26, mirrored
+// +$18.04) and beats round 5 on crash (+$39.14 vs +$34.26) and mean
+// (+$18.60 vs +$17.38), tying round 5's floor. The dev window is a
+// single trade and its +1.0% take-profit is near-optimal (peak close
+// +1.07%), so the floor stays +$8.60 -- the gain is the crash ceiling,
+// not the floor.
 //
 // One asset, CBBTC (Coinbase Wrapped BTC on Solana), long only, $1,000 of
 // paper money, one-minute bars. Every trigger is RELATIVE (trailing highs,
@@ -76,6 +97,10 @@
 // window the first wave loses only $5.12, so the cap stays open and
 // the recovering waves still fire. A 2% cap ($980) is too loose: it
 // lets a second losing snap wave through on the crash window.
+// Round 6: the latch re-arms -- once flat and realised equity is back
+// at or above $990 (e.g. after a deep win), snap entries are allowed
+// again, and the latch re-trips the same way if equity falls back
+// below $990.
 //
 // DEEP V tiers -- the crash catcher, inherited from the previous race's
 // v5 (proven there: the same two fills, 62,648 then 62,266, made +$45.98
@@ -246,6 +271,17 @@ function onBatch(state: BarsState): OrderInput[] {
   // every-bar check killed the recovering waves 2-3. It does NOT gate
   // deep entries (the crash window's deep trade is what pays).
   if (qty === 0n && state.equity < LOSS_CAP_USDC) stopped = true;
+
+  // Round 6 re-arm: once flat and realised equity is back at or above
+  // the $990 line, the latch releases and snap entries are allowed
+  // again. The latch's job is to stop the bleeding after a loss; once a
+  // deep win has repaired equity, the reason for it is gone. On the
+  // crash window the deep trade exits at $1,034.26, the latch releases,
+  // and a second dip at bar 1408 (2.49% + recovery) fires a snap wave
+  // that adds +$4.88 by the window end. If a re-armed wave loses again
+  // and equity falls back below $990, the latch above re-trips the
+  // same way, so the protection re-engages.
+  if (stopped && qty === 0n && state.equity >= LOSS_CAP_USDC) stopped = false;
 
   // A buy filled since the last batch: re-derive the averaged entry.
   // value(qty, price) = qty * price / 10**7, so price = cost * 10**7 / qty.

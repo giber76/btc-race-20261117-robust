@@ -1,4 +1,25 @@
-// RangeRider round 6 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
+// RangeRider round 7 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
+//
+// Round 7 changes (vs round 6 84cb20e): the deep tier-1 dip deepens
+// from 4.8% to 5.0% below the trailing 360-minute high (DEEP1_DD 48n ->
+// 50n). Tier 1 now buys at 62507 instead of 62647 on the crash window,
+// so the blended entry is lower and the deep trade exits +$0.92 richer.
+// Crash +$39.14 -> +$40.06, mean +$18.60 -> +$18.83; every other window
+// is unchanged, and the shallow-crash proxy (scale-in never triggers)
+// rises too, +$10.58 -> +$11.50. The gain is a flat plateau across
+// 50/51/52 (+$40.03-40.06, shallow +$11.47-11.50), not a single-bar
+// cliff. Considered and REJECTED: deep1_dd=53 (+$40.68 real, +$13.31
+// shallow) collapses tier 1 into tier 2, so the bot buys all-in at 5.3%
+// and makes NO deep trade at all if the live dip stops at 5.0-5.2% --
+// the 5.0% tier-1 net is worth more than +$0.62 on one window.
+// Deep tier-3 (5.6-6.2%) never fires: the post-scale-in trough is only
+// 5.66%. Partial scale-in is strictly worse (30%: +$19.43, 50%: +$25.19,
+// 70%: +$30.85 -- the trough buy is the money). Tier-2-only snap hold
+// 300/360 breaks the falling window (-$13.86/-$0.97). No second deep
+// trade exists after the deep exit (max dip 2.60%). The dev floor stays
+// +$8.60: the dev window is a single trade whose +1.0% take-profit is
+// near-optimal (peak +1.07%), and no second dip ever occurs after the
+// exit, so no further round can lift the floor from this code.
 //
 // Round 6 changes (vs round 5 e45da0a): the loss-cap latch now RE-ARMS.
 // Once flat and realised equity is back at or above the $990 line, the
@@ -104,8 +125,8 @@
 //
 // DEEP V tiers -- the crash catcher, inherited from the previous race's
 // v5 (proven there: the same two fills, 62,648 then 62,266, made +$45.98
-// on the 20261115 window). Tier 1 buys 40% of cash at 4.8% below the
-// trailing 360-minute high; while holding it, a further fall to 5.3%
+// on the 20261115 window). Tier 1 buys 40% of cash at 5.0% below the
+// trailing 360-minute high (round 7: 4.8% -> 5.0%); while holding it, a further fall to 5.3%
 // below that high buys all remaining cash (tier 2 scale-in). A straight
 // gap past 5.3% buys all cash at once. Exits: +4.5% over the blended
 // entry, 1.2% trailing stop, 1.5% hard stop, 240 bars. No trend or
@@ -136,9 +157,9 @@
 // the kit; kit grade-local below must reproduce the dev line):
 //   dev 20261117 (this race):  +$8.60, 2 trades, 1 wave, max DD 0.57%
 //   prev race window 20261113: +$8.61, 6 trades, 3 waves, max DD 2.15%
-//   prev race window 20261115: +$34.26, 5 trades, 2 waves, max DD 1.84%
+//   prev race window 20261115: +$40.06, 6 trades, 3 waves, max DD 1.69%
 //   mirrored dev window:       +$18.04, 4 trades, 2 waves, max DD 0.53%
-// Worst window +$8.60, mean +$17.38. The v1 entry it replaces graded
+// Worst window +$8.60, mean +$18.83. The v1 entry it replaces graded
 // +$22.35 on dev but was negative on both held-out windows; this version
 // trades dev upside for never losing out of sample. Max 12 waves per
 // window; at most one position at a time.
@@ -171,7 +192,7 @@ const SNAP_RECOVERY_WIN = 30;
 const LOSS_CAP_USDC = 990_000_000n; // stop snap entries below $990 equity (round 4: 1% realised-loss cap)
 
 // Deep V tiers (v5, proven on the crash window).
-const DEEP1_DD = 48n; // 4.8% below the trailing 360-min high, tier 1
+const DEEP1_DD = 50n; // 5.0% below the trailing 360-min high, tier 1 (round 7: 4.8% -> 5.0% -- tier 1 now buys at 62507 instead of 62647 on the crash window, so the blended entry is lower and the deep trade exits +$0.92 richer; 50/51/52 form a flat plateau, and the shallow-crash proxy rises too, +$10.58 -> +$11.50)
 const DEEP2_DD = 53n; // 5.3% below the trailing 360-min high, tier 2
 const DEEP_HIGH_WIN = 360;
 const DEEP1_SIZE_PCT = 40n; // tier 1 spends 40% of cash

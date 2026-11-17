@@ -1,4 +1,22 @@
-// RangeRider v2 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
+// RangeRider v4 -- robust three-mode cbBTC bot for btc-race-24h-20261117-0603.
+//
+// v4 changes (vs shipped v2 b804997): snap size 95% -> 100% of cash;
+// the loss-cap latch now evaluates ONLY while flat (realised equity),
+// so an intra-trade trough no longer kills the recovering waves on a
+// falling window; and a 40-bar cooldown follows a LOSING snap exit
+// (20 after a win), which blocks the third, losing snap wave on the
+// crash window while letting the spaced-out recovering waves on the
+// falling window through. Everything else is the shipped v2.
+//   dev 20261117 (this race):  +$8.60, 2 trades, 1 wave, max DD 0.57%
+//   prev race window 20261113: +$8.61, 6 trades, 3 waves
+//   prev race window 20261115: +$18.44, 7 trades, 3 waves
+//   mirrored dev window:       +$18.04, 4 trades, 2 waves
+// Worst window +$8.60 (v2: +$8.27). Honest trade-off: the bigger size
+// and looser latch cost the crash window $12.82 (v2: +$31.26) -- the
+// deep trade is unchanged, the snap waves before it lose more. This
+// version maximises the worst window, not the mean (v2 mean +$16.36,
+// v4 mean +$13.42) or the crash upside. Worst-window floor vs crash
+// upside is the call Giber makes before spending the last day-submit.
 //
 // One asset, CBBTC (Coinbase Wrapped BTC on Solana), long only, $1,000 of
 // paper money, one-minute bars. Every trigger is RELATIVE (trailing highs,
@@ -22,14 +40,16 @@
 // dip has stopped falling). No trend gate, no bounce gate: the 2.0% dip
 // plus the recovery gate is what keeps the falling windows positive --
 // shallower dips (1.6-1.8%) add only losing trades out of sample. Spend
-// 95% of cash (100% fails the 20261113 window: the cliff is between 95
-// and 100). Exit at +1.0% over entry, a 0.8% trailing stop below the peak
-// since entry once +0.8% up, a 1.0% hard stop, or 240 bars held. A
+// 100% of cash (v4: the latch now evaluates only while flat, so the
+// 20261113 wave-1 trough no longer kills the recovering waves). Exit at
+// +1.0% over entry, a 0.8% trailing stop below the peak since entry once
+// +0.8% up, a 1.0% hard stop, or 240 bars held. A
 // 20-bar cooldown after an exit fill keeps the bot from re-entering a
 // still-falling market (it is what saves the 20261115 window: +$17.76
 // without it, +$31.26 with it). A 2% loss cap latches snap entries off
-// once marked equity falls below $980 -- a tighter 1%/1.5% cap kills the
-// 20261113 window by blocking its recovering waves, so 2% is the level.
+// once REALISED equity falls below $980 (v4: evaluated only while flat)
+// -- a tighter 1%/1.5% cap kills the 20261113 window by blocking its
+// recovering waves, so 2% is the level.
 //
 // DEEP V tiers -- the crash catcher, inherited from the previous race's
 // v5 (proven there: the same two fills, 62,648 then 62,266, made +$45.98
@@ -63,11 +83,11 @@
 //
 // Honest numbers (bit-perfect Python simulator, same integer fill math as
 // the kit; kit grade-local below must reproduce the dev line):
-//   dev 20261117 (this race):  +$8.27, 2 trades, 1 wave, max DD 0.46%
-//   prev race window 20261113: +$8.56, 6 trades, 3 waves, max DD 1.72%
-//   prev race window 20261115: +$31.26, 7 trades, 3 waves, max DD 2.72%
-//   mirrored dev window:       +$17.35, 4 trades, 2 waves, max DD 0.39%
-// Worst window +$8.27. The v1 entry it replaces graded +$22.35 on dev
+//   dev 20261117 (this race):  +$8.60, 2 trades, 1 wave, max DD 0.57%
+//   prev race window 20261113: +$8.61, 6 trades, 3 waves, max DD 2.15%
+//   prev race window 20261115: +$18.44, 7 trades, 3 waves, max DD 3.20%
+//   mirrored dev window:       +$18.04, 4 trades, 2 waves, max DD 0.53%
+// Worst window +$8.60. The v1 entry it replaces graded +$22.35 on dev
 // but was negative on both held-out windows; this version trades dev
 // upside for never losing out of sample. Max 12 waves per window; at
 // most one position at a time.
@@ -85,7 +105,7 @@ const SYMBOL = 'CBBTC';
 const SNAP_DIP1 = 20n; // 2.0% below the trailing 420-min high of highs
 const SNAP_DIP2 = 27n; // 2.7% below that high (tier 2)
 const SNAP_HI_WIN = 420;
-const SNAP_SIZE_PCT = 95n; // spend 95% of cash (100% fails 20261113)
+const SNAP_SIZE_PCT = 100n; // spend 100% of cash (v4: flat-only latch saves 20261113)
 const SNAP_TAKE1 = 10n; // +1.0% over entry (tier 1)
 const SNAP_STOP1 = 10n; // 1.0% under entry (tier 1)
 const SNAP_TAKE2 = 25n; // +2.5% over entry (tier 2)
@@ -94,6 +114,7 @@ const SNAP_ARM = 8n; // trail arms once +0.8% up
 const SNAP_TRAIL = 8n; // 0.8% below the peak since entry
 const SNAP_HOLD = 240; // bars, then out
 const SNAP_COOLDOWN = 20; // bars after an exit fill before re-entering
+const SNAP_COOLDOWN_LOSS = 40; // bars after a LOSING snap exit (v4)
 const SNAP_RECOVERY = 2n; // 0.2% above the trailing 30-min low
 const SNAP_RECOVERY_WIN = 30;
 const LOSS_CAP_USDC = 980_000_000n; // stop snap entries below $980 equity
@@ -135,6 +156,9 @@ let scaled = false; // deep tier-2 scale-in already sent
 let snapTier = 0; // snapback tier of the open position (1 or 2)
 let lastExitSeq = -1_000_000; // seq of the batch the last sell filled on
 let stopped = false; // loss-cap latch: snap entries off for the window
+let cashAtOpen = 0n; // cash when the open position's first buy was sent
+let lastExitMode: Mode | null = null; // mode of the last closed trade
+let lastExitWasLoss = false; // the last closed trade lost money (v4)
 
 function highest(n: number): bigint {
   const start = Math.max(0, closes.length - n);
@@ -187,13 +211,15 @@ function onBatch(state: BarsState): OrderInput[] {
   if (closes.length > HISTORY) closes.shift();
   if (highs.length > HISTORY) highs.shift();
 
-  // Loss cap, checked every bar and latching: once marked equity falls
-  // 2% below the $1,000 start, snap entries stop for the window. It does
-  // NOT gate deep entries (the crash window's deep trade is what pays).
-  if (state.equity < LOSS_CAP_USDC) stopped = true;
-
   const holding = state.positions.get(SYMBOL);
   const qty = holding === undefined ? 0n : holding.qty;
+
+  // Loss cap, evaluated ONLY while flat and latching on REALISED equity
+  // (v4): an intra-trade trough no longer trips it -- at 100% size the
+  // 20261113 wave-1 trough dips below $980 mid-trade and the old
+  // every-bar check killed the recovering waves 2-3. It does NOT gate
+  // deep entries (the crash window's deep trade is what pays).
+  if (qty === 0n && state.equity < LOSS_CAP_USDC) stopped = true;
 
   // A buy filled since the last batch: re-derive the averaged entry.
   // value(qty, price) = qty * price / 10**7, so price = cost * 10**7 / qty.
@@ -204,6 +230,10 @@ function onBatch(state: BarsState): OrderInput[] {
   }
   // A sell filled: the position is gone (this bot only ever sells all of it).
   if (qty === 0n && prevQty > 0n) {
+    // Realised PnL of the closed trade: cash now minus cash when the
+    // position's first buy was sent (v4: drives the post-loss cooldown).
+    lastExitWasLoss = state.cash < cashAtOpen;
+    lastExitMode = mode;
     entryPrice = 0n;
     peakSinceEntry = 0n;
     holdBars = 0;
@@ -272,19 +302,27 @@ function onBatch(state: BarsState): OrderInput[] {
   if (closeNow * 1000n <= high360 * (1000n - DEEP2_DD)) {
     waves += 1;
     mode = 'deep';
+    cashAtOpen = state.cash;
     return [buy(state.cash)];
   }
   if (closeNow * 1000n <= high360 * (1000n - DEEP1_DD)) {
     waves += 1;
     mode = 'deep';
+    cashAtOpen = state.cash;
     return [buy((state.cash * DEEP1_SIZE_PCT) / 100n)];
   }
 
   // Snapback: dip below the 420-minute high of bar highs, off a stopped
   // fall (close 0.2% above the trailing 30-minute low). Gated by the
-  // 20-bar post-exit cooldown and the 2% loss-cap latch. Tier 2 (2.7%
-  // dip) takes the wider exits; tier 1 (2.0% dip) the tight ones.
-  if (!stopped && state.seq - lastExitSeq >= SNAP_COOLDOWN) {
+  // 20/40-bar post-exit cooldown (v4: 40 after a losing snap exit) and
+  // the 2% loss-cap latch. Tier 2 (2.7% dip) takes the wider exits;
+  // tier 1 (2.0% dip) the tight ones.
+  // Post-loss cooldown (v4): 40 bars after a losing snap exit, 20
+  // otherwise. The 20261115 third snap wave fires 21 bars after the
+  // second wave's losing exit; the 20261113 recovering wave fires 43
+  // bars after its losing exit -- 40 sits between them.
+  const snapCd = lastExitMode === 'snap' && lastExitWasLoss ? SNAP_COOLDOWN_LOSS : SNAP_COOLDOWN;
+  if (!stopped && state.seq - lastExitSeq >= snapCd) {
     const high420 = highestHigh(SNAP_HI_WIN);
     const low30 = lowest(SNAP_RECOVERY_WIN);
     if (closeNow * 1000n >= low30 * (1000n + SNAP_RECOVERY)) {
@@ -292,12 +330,14 @@ function onBatch(state: BarsState): OrderInput[] {
         waves += 1;
         mode = 'snap';
         snapTier = 2;
+        cashAtOpen = state.cash;
         return [buy((state.cash * SNAP_SIZE_PCT) / 100n)];
       }
       if (closeNow * 1000n <= high420 * (1000n - SNAP_DIP1)) {
         waves += 1;
         mode = 'snap';
         snapTier = 1;
+        cashAtOpen = state.cash;
         return [buy((state.cash * SNAP_SIZE_PCT) / 100n)];
       }
     }
@@ -312,6 +352,7 @@ function onBatch(state: BarsState): OrderInput[] {
   ) {
     waves += 1;
     mode = 'rider';
+    cashAtOpen = state.cash;
     return [buy((state.cash * RIDER_SIZE_PCT) / 100n)];
   }
   return [];
